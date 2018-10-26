@@ -1,0 +1,110 @@
+---
+title: "Experimental text mining - AT3, DAM"
+author: "Alex Brooks"
+date: "10/24/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tm)
+library(stringr)
+library(koRpus)
+library(tidytext)
+library(dplyr)
+library(wordcloud)
+library(textstem)
+library(widyr)
+```
+
+## Tidytext
+
+H 
+```{r}
+ourtext <- Corpus(DirSource("../raw_data/doc_corpus"))
+str(ourtext)
+ourtext <- ourtext %>%
+  select (-author, -datetimestamp, -id)
+ourtext.un <- ourtext %>%
+  unnest_tokens(word, text)
+```
+
+## Lexical variation
+
+Lexical variation in language is considered to be multi-dimensional; all languages go through variations based on time and social settings. There are different lexical variants to the same word in same language. For instance, in the US, what you call a cookie is a biscuit in the UK. Broadly, lexical variations are of two categories: conceptual variation and contextual variation, which is further categorized to formal variation, semasiologically variation, and onomasiolofical variation. The koRpus package in R provides functions to estimate lexical variation.
+
+```{r }
+plot(pressure)
+```
+##Bigrams and ngrams
+e can run the corpus through a part-of-speech (POS) tagger. This would filter the bigrams to more content-related pairs such as infrastructure development, agricultural subsidies, banking rates; this can be one way of filtering less meaningful bigrams.
+
+A better way to approach this problem is to take into account collocations; a collocation is the string created when two or more words co-occur in a language more frequently. One way to do this over a corpus is pointwise mutual information (PMI).The concept behind PMI is for two words, A and B, we would like to know how much one word tells us about the other. For example, given an occurrence of A, a, and an occurrence of B, b, how much does their joint probability differ from the expected value of assuming that they are independent. 
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+```
+##RKEA package
+The RKEA package provides an interface to KEA, which is a tool for keyword extraction from texts. RKEA requires a keyword extraction model, which can be created by manually indexing a small set of texts, using which it extracts keywords from the document.
+
+```{r}
+
+```
+##Word tokenization
+Tokenization is the process of breaking up a stream of text, a character sequence or a defined document unit, into phrases, words, symbols, or other meaningful elements called tokens. The goal of tokenization is the exploration of the words in a sentence. Before we do any kind on analysis on the text using a language processor, we need to normalize the words. When we do quantitative analysis on the text we consider it a bag of words. and extract the key words, frequency of occurrence, and the importance of each word in the text. 
+
+
+RWeka package provides word, n-gram and alphabetic tokenizers:
+
+#Text2Vec does topic modelling
+```{r}
+library(text2vec)
+corpus_file = "../raw_data/doc_corpus"
+text2vec <- readLines(corpus_file, n = 1, warn = FALSE)
+```
+```{r}
+# Create iterator over tokens
+tokens <- space_tokenizer(text2vec)
+# Create vocabulary. Terms will be unigrams (simple words).
+it = itoken(tokens, progressbar = FALSE)
+vocab <- create_vocabulary(it)
+
+# Take words which appear 5 or more times
+vocab <- prune_vocabulary(vocab, term_count_min = 5L)
+
+# Use our filtered vocabulary
+vectorizer <- vocab_vectorizer(vocab)
+# Create Term Co-occurence matrix, use window of 5 for context words
+text2vec_tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
+#Now there is a TCM matrix, it can be factorized using the GloVe algorithm
+# Can modify the number of threads used in parallel - default is all available
+RcppParallel::setThreadOptions(numThreads = 8)
+
+# Train the GloVe model
+glove = GlobalVectors$new(word_vectors_size = 30, 
+                          vocabulary = vocab, x_max = 10, learning_rate = 0.001, shuffle = FALSE)
+word_vectors_main = glove$fit_transform(text2vec_tcm, n_iter = 30, convergence_tol = 0.01)
+
+dim(word_vectors_main)
+#This keeps giving errors - let's abandon text2vec an try topicmodels package instead
+```
+
+ ##Tidytext
+ Defined as one term per row, differs from teh document term matric which has one document per row and one term per column
+ 
+ 
+```{r}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(tidytext)
+library(broom)
+library(scales)
+#use clean.docs for exploration
+corpus_file = "../raw_data/doc_corpus"
+tidytext <- readLines(corpus_file, n = 1, warn = FALSE)
+```
+##Sentiment analysis
+```{r}
+get_sentiments("bing")
+```

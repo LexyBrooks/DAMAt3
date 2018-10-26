@@ -1,0 +1,697 @@
+---
+title: "So my boss just handed me a load of documents"
+author: "Alex Brooks"
+date: "10/14/2018"
+output: html_document
+---
+##My goal is to find out what's in these 41 different text documents
+```{r setup, include=FALSE}
+library(tm) 
+library(lsa)
+library(SnowballC)
+library(ggplot2)
+library(wordcloud)
+library(cluster)
+library(dplyr)      #manipulate dataframes
+library(knitr)       # used to make kable tables
+library(magrittr)
+library(ggthemes)    #to make plots look more interesting
+library(udpipe)
+```
+
+##Hey boss, here's how I started to take a look at those 41 different documents
+
+Looking at docs corpus and analysing themes means loading the docs and cleaning them to turn them into the correct format for analysis.
+
+```{r}
+#Load the corpus
+docs <- VCorpus(DirSource("../raw_data/doc_corpus"))
+```
+
+#Write a standard function to clean the documents
+```{r}
+
+clean_docs <- function(docs) {
+  
+  output = docs
+  
+  #Remove punctuation - replace punctuation marks with " "
+  output = tm_map(output, removePunctuation)
+  
+  #Transform to lower case
+  output = tm_map(output,content_transformer(tolower))
+  
+  #Strip digits
+  output = tm_map(output, removeNumbers)
+  
+  #Remove stopwords from standard stopword list 
+  output = tm_map(output, removeWords, stopwords("english"))
+  
+  #Create a custom set of stopwords that weren't removed by the standard stopwords list
+  myStopwords <- c("can",
+                   "also",
+                   "get",
+                   "see",
+                   "may",
+                   "much",
+                   "now",
+                   "said",
+                   "will",
+                   "way",
+                   "well",
+                   "howev",
+                   "say",
+                   "one",
+                   "use")
+  
+  #Remove the custom stopwords
+  output = tm_map(output, removeWords, myStopwords)
+  
+  #Strip whitespace (cosmetic?)
+  output = tm_map(output, stripWhitespace)
+  
+  return(output)
+  
+}
+```
+
+```{r}
+clean.docs <- clean_docs(docs)
+```
+
+#A bit of basic analysis of documents with this function
+```{r}
+
+document_info <- function(documents, clean.documents) {
+  
+  num.documents = length(clean.documents)
+  
+  for(i in 1:num.documents) {
+    document.meta = clean.documents[[i]]$meta
+    document.content = clean.documents[[i]]$content
+    raw.document.content = documents[[i]]$content
+    
+    if (i == 1) {
+      document.summary = data.frame(id = document.meta$id, language = document.meta$language, datetimestamp = document.meta$datetimestamp, raw.characters = nchar(raw.document.content), clean.characters = nchar(document.content))
+    } else {
+      document.temp = data.frame(id = document.meta$id, language = document.meta$language, datetimestamp = document.meta$datetimestamp, raw.characters = nchar(raw.document.content), clean.characters = nchar(document.content))
+      document.summary = rbind(document.summary, document.temp)
+    }
+  }
+  
+  return(document.summary)
+}
+```
+
+```{r}
+#running the function on raw docs and clean docs
+document_info(docs, clean.docs)
+#shortest doc is just 5072 raw characters, longest is doc19 has raw 34921
+#ANT: I want to plot this
+##Also, I want to know if there's a way to 'rename' the document according to it's theme - IE, can I examine each document singularly and take a look at each one??
+#I apparently need to turn it into a dataframe for plotting so I tried the following code, but it wouldn't work
+#data.frame(text = sapply(clean.docs, as.character), stringsAsFactors = FALSE)
+#plot length of clean characters in each doc
+#ggplot(data.frame, aes(id, clean.characters)) + geom_bar(stat = "identity",fill='lightblue',color='black') + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  theme_economist()+scale_color_economist() 
+```
+ 
+##Insights on the corpus
+
+```{r}
+clean.docs <- tm_map(clean.docs,stemDocument)
+#inspect
+writeLines(as.character(clean.docs[[num.docs]]))
+#end of preprocessing
+
+```
+
+```{r}
+#Create document-term matrix
+dtm <- DocumentTermMatrix(clean.docs)
+#summary
+dtm
+```
+
+There are 41 separate documents using 4492 terms with the term frequency weighting. The maximal term length is 114 - that's long! It could be an error
+#4492 terms in the 41 docs
+```{r}
+#inspect segment of document term matrix
+inspect(dtm[15:20,3200:3492])
+#This just gives a sample, but I checked various numbers and the terms very much relate to the themes of machine learning, data science, risk management, project management and monte carlo probabilities.
+#collapse matrix by summing over columns - this gets total counts (over all docs) for each term
+freq <- colSums(as.matrix(dtm))
+freq
+#also academi terms, and appendix
+#length should be total number of terms
+length(freq)
+#create sort order (asc)
+ord <- order(freq,decreasing=TRUE)
+ord
+#inspect most frequently occurring terms
+freq[head(ord)]
+#write to disk and inspect file ##ANT THIS CSV IS ACTUALLY EMPTY?
+write.csv(file="../clean_data/freq.csv",freq[ord])
+View('freq.csv')
+# get the top 10 words by frequency of appeearance
+freq <- words_frequency[head(ord, 10)] 
+```
+
+
+## Let's start visualising these themes after looking at the least frequent terms and then finding correlations with the frequent terms
+Project, risk and management are the most frequent. What else could be interesting, especially from a data science perspective:
+Algorithm, approach, cluster.
+Author, article, knowledge, academi, appendix - seem very academic or authorly and could be of interest to Smartbox
+Method, model, function, interest - relates to data science
+Manage, organise, project, risk - relate to managing technically innovative projects that may relate to data science
+Technique, term, understand, 
+Word, post and work - the word "post" can mean letters but also posting on a blog or watching your post
+```{r}
+#inspect least frequently occurring terms - this isn't particularly helpful
+freq[tail(ord)]
+#list most frequent terms. Lower bound specified as second argument
+OtherFreq <- findFreqTerms(dtm,lowfreq=30)
+OtherFreq
+```
+
+#Finding correlations with the frequent terms
+```{r}
+#correlations
+findAssocs(dtm,"algorithm",0.9)
+#this doesn't look all that interesting - it's frequent, but correlations not giving information
+```
+```{r}
+findAssocs(dtm,"cluster",0.75) 
+#ANT I WANT TO PLOT THIS, BUT CAN'T DO ITclearly lots of associations, meaning this is relating to clustering in data science
+#wordcloud of this could be good for the main report back to my boss
+#setting the same seed each time ensures consistent look across clouds
+#set.seed(42)
+#wordcloud(names(dtm, "cluster", 0.75),dtm,max.words=50,colors=brewer.pal(6,"Dark2"))
+#play with different values of max.words
+#try specifying min.freq instead of max.words
+```
+```{r}
+findAssocs(dtm,"project",0.6)
+#projects in a management or business context. Lose dollar or win also has some kind of business or probability element
+```
+```{r}
+findAssocs(dtm,"risk",0.5)
+```
+
+
+```{r}
+#the associations with the term document reveal the corpus has plenty of information about text mining and R programs in it, with lots of snippets from cod like "setwduserskailahdocumentstextmin" and "tmmapsdocsstemdocu"
+findAssocs(dtm,"document",0.8)
+```
+```{r}
+findAssocs(dtm,"method",0.8) #reveals data science themes
+findAssocs(dtm,"time",0.8) #reveals an important component of risk and project management
+findAssocs(dtm,"data",0.8)
+findAssocs(dtm,"manag",0.8)
+```
+```{r, fig.width=10, fig.height=12}
+findAssocs(dtm,"eleph", 0.08)
+#wordcloud
+```
+
+
+```{r}
+#histogram
+wf = data.frame(term=names(freq), occurrences=freq)
+
+ggplot(subset(wf, occurrences>100), aes(term, occurrences)) + geom_bar(stat="identity", fill = 'lightblue', color='black') + theme(axis.text.x=element_text(angle=45, hjust=1)) + labs(title = "Most frequently occuring terms in the 41 documents",
+             x = "Words", y = "occurences")
+```
+# Project is a word likely to co-occur with both management and other words like work or problem or example
+
+```{r}
+#order the plot by frequency
+ggplot(subset(wf, occurrences>100), aes(reorder(term,occurrences), occurrences)) + geom_bar(stat="identity", fill = 'lightblue', color='black') + theme(axis.text.x=element_text(angle=45, hjust=1)) + labs(title = "Most frequently occuring terms in order of volume in 41 documents",
+             x = "Words", y = "occurences")
+```
+ 
+
+```{r, fig.width=10, fig.height=12}
+#wordcloud
+#setting the same seed each time ensures consistent look across clouds
+set.seed(42)
+
+#limit words by specifying min frequency
+wordcloud(names(freq),freq, max.words=80)
+
+#...add color
+wordcloud(names(freq),freq,max.words=75,colors=brewer.pal(6,"Dark2"))
+
+```
+#Make ngrams when you want to explore what's in a particular document
+```{r}
+#to see what ngrams does, try running ngrams(words(docs[[1]]$content),2), which
+ngrams(words(docs[[1]]$content),2) 
+    ```
+
+
+#Making bigrams of words in the corpus
+
+```{r}
+
+#returns bigrams for the first document in the corpus
+BigramTokenizer <-  function(x) unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
+#create DTM
+dtmbi <- DocumentTermMatrix(clean.docs, control = list(tokenize = BigramTokenizer))
+freqbi <- colSums(as.matrix(dtmbi))
+#length should be total number of terms - seem to be 34967 bigrams
+length(freqbi)
+#create sort order (asc)
+ordbi <- order(freqbi,decreasing=TRUE) %>% 
+  kable()
+#inspect most frequently occurring terms
+freqbi[head(ordbi)]
+#ANT QUESTION - CAN I PLOT THIS?
+
+```
+
+
+##TF-IDF
+TF is the term frequency, or how frequently a word occurs in a document. IDF is inverse document frequency, which decreases the weight for commonly used words and increases the weight for words that are not used very much in a collection of documents. 
+
+```{r}
+dtm_tfidf <- DocumentTermMatrix(clean.docs, control = list(weighting = weightTfIdf))
+#note that the weighting is normalised by default (that is, the term frequencies in a
+#document are normalised by the number of terms in the document)
+#summary
+dtm_tfidf
+```
+#TF IDF has less terms now
+
+```{r}
+#inspect segment of document term matrix
+inspect(dtm_tfidf[20:30,2000:2006])
+
+```
+
+```{r}
+#collapse matrix by summing over columns - this gets total weights (over all docs) for each term
+wt_tot_tfidf <- colSums(as.matrix(dtm_tfidf))
+#length should be total number of terms
+length(wt_tot_tfidf )
+#create sort order (asc)
+ord_tfidf <- order(wt_tot_tfidf,decreasing=TRUE)
+#inspect most frequently occurring terms
+wt_tot_tfidf[head(ord_tfidf)] %>% 
+  kable()
+#write to disk and inspect file
+write.csv(file="../clean_data/wt_tot_tfidf.csv",wt_tot_tfidf[ord_tfidf])
+```
+```{r}
+#inspect least weighted terms - wickham, wordcloudnames and what looks like a jumble of r code snippets. youtube, zip
+wt_tot_tfidf[tail(ord_tfidf)]
+#ANT QUESTION _ CAN I PLOT THIS?
+wt_tot_tfidf[head(ord_tfidf)]
+#is simul about monte carlo? I should probably also explore the elephant, which is a metaphor in a couple of documents - could maybe fictionalise this because there is a publisher prize for the best use of elephant similes and metaphors in academic writing???
+
+```
+##I want to do a graph like this of the top terms in all 41 docs https://rpubs.com/tsholliger/301914
+(Scroll down halfway to see highest tf-idf words in Philosophers Stone by Chapter)
+```{r}
+#Convert dtm into a Dataframe
+library(tidytext)
+# THIS IS THE COPY AND PASTED CODE JUST FOR YOUR REFERENCE - NOTE THE TIDY FUNCTION IS NOW DEPRECATED take the product of tf and idf and create new column labeled "tf_idf". Graph it. 
+#bind_tf_idf(dtm_tfidf, term_col = term, document_col = document, n_col = count) %>% 
+  #arrange(desc(dtm_tfidf)) %>%
+  #mutate(word = factor(term, levels = rev(unique(term))),
+               #chapter = factor(document, levels = 1:17)) %>%  
+  #group_by(document) %>% 
+  #top_n(6, wt = tf_idf) %>% 
+  #ungroup() %>% 
+  #ggplot(aes(word, tf_idf, fill = document)) +
+        #geom_bar(stat = "identity", alpha = .8, show.legend = FALSE) +
+        #labs(title = "Highest tf-idf words in Philosopher's Stone by Chapter",
+            # x = "Words", y = "tf-idf") +
+        #facet_wrap(~chapter, ncol = 2, scales = "free") +
+        #coord_flip()
+
+```
+
+```{r, fig.width=10, fig.height=12}
+#try a word cloud of tfidf
+#setting the same seed each time ensures consistent look across clouds
+set.seed(42)
+#limit words by specifying min total wt
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf, max.words=50)
+#...add color
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,max.words=150,colors=brewer.pal(6,"Dark2"))
+#play with different values of max.words
+#try specifying min.freq instead of max.words
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,min.freq=200,colors=brewer.pal(6,"Dark2"))
+```
+```{r}
+#correlations - compare to dtm generated by  tf and tf/truncated weighting "project" at correlation level of 0.6
+findAssocs(dtm_tfidf,"risk",0.5)
+findAssocs(dtm_tfidf,"distribution",0.8)
+findAssocs(dtm_tfidf,"elephant",0.4)
+findAssocs(dtm_tfidf,"monte carlo",0.8)
+findAssocs(dtm_tfidf,"eleph",0.5)
+findAssocs(dtm_tfidf,"wickham",0.8)
+findAssocs(dtm_tfidf,"hubbard",0.8)
+findAssocs(dtm_tfidf,"scapegoat",0.8)
+findAssocs(dtm_tfidf,"risk",0.8)
+findAssocs(dtm_tfidf,"post",0.5)
+findAssocs(dtm_tfidf,"project",0.5)
+findAssocs(dtm_tfidf,"manag",0.5)
+```
+```{r, fig.width=10, fig.height=12}
+#histogram
+wf=data.frame(term=names(wt_tot_tfidf),weights=wt_tot_tfidf)
+#library(ggplot2)
+ggplot(subset(wf, wt_tot_tfidf>.1), aes(reorder(term,weights), weights)) + geom_bar(stat="identity") + theme(axis.text.x=element_text(angle=45, hjust=1)) + labs(title = "Tf-idf terms in all docs", x = "Words", y = "tf-idf weights") 
+```
+#WOrdcloud of TF-IDF - to see weighted words
+```{r, fig.width=10, fig.height=12}
+#wordcloud
+#setting the same seed each time ensures consistent look across clouds
+set.seed(42)
+#limit words by specifying min total wt
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf, max.words=100)
+#...add color
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,max.words=100,colors=brewer.pal(6,"Dark2"))
+#play with different values of max.words
+#try specifying min.freq instead of max.words
+wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,min.freq=50,colors=brewer.pal(6,"Dark2"))
+
+```
+##Cluster analysis
+What can we discover. Clustering should allow us to see what 'goes' together - can our three themes of "monte carlo", "data science and machine learning" and "project and risk management" be identified?
+
+We need to report on the different results of the clustering and justify what we went with.
+
+This is a good tutorial on doing all the clustering and making one "win" https://recast.ai/blog/text-clustering-with-r-an-introduction-for-data-scientists/ = would be good to replicate this for this assignment. This is Kailash's post about it https://eight2late.wordpress.com/2015/07/22/a-gentle-introduction-to-cluster-analysis-using-r/
+```{r}
+#Create document-term matrix
+cluster <- DocumentTermMatrix(clean.docs)
+## start clustering specific code
+#convert dtm to matrix  
+cluster.matrix <- as.matrix(cluster)
+#write as csv file
+write.csv(cluster.matrix,file="../clean_data/ClusterAsMatrix.csv")
+```
+
+
+```{r}
+#ward D with 3 hangs
+hcluster.distance <- dist(cluster.matrix, method="euclidean")
+#run hierarchical clustering using Ward's method (explore other options later)
+hcluster.groups <- hclust(hcluster.distance,method= 'ward.D')
+#plot 
+plot(hcluster.groups, hang=-3)
+#ASK ANT ABOUT RECT ERROR IN ALL CLUSTERING
+```
+#This gives two big splits,clustering19-22 and 35, 38,39,40 and 41 together
+```{r}
+#wardD2 with 5 hangs
+hcluster.groups2 <- hclust(hcluster.distance,method= 'ward.D2')
+#plot 
+plot(hcluster.groups2, hang=-5)
+hcluster.hclusters <- cutree(hcluster.groups,2)
+write.csv(hcluster.hclusters,"../clean_data/hclusterswardd2.csv")
+#ASK ANT ABOUT RECT ERROR IN ALL CLUSTERING
+```
+ 
+##Cosine distance clusters
+```{r}
+
+
+##try another distance measure
+cosineSim <- function(x){
+  as.dist(x%*%t(x)/(sqrt(rowSums(x^2) %*% t(rowSums(x^2)))))
+}
+cosine <- cosineSim(cluster.matrix)
+cosine.distance <- cosine
+
+#run hierarchical clustering using cosine distance
+cosine.groups <- hclust(cosine.distance, method="ward.D")
+#plot, use hang to ensure that labels fall below tree
+plot(cosine.groups, hang=-1)
+#cut into 2 subtrees.
+rect.hclust(cosine.groups, 3)
+cosine.hclusters <- cutree(cosine.groups, 3)
+write.csv(cosine.hclusters, "../clean_data/hclusters_cosine.csv")
+#ASK ANT ABOUT RECT ERROR IN CLUSTERING BUT NOT IN THIS ONE - I WOULD NEED TO PLAY TO GET THIS TO SHOW WHAT I WANT IT TO SHOW!!! BUT IT WOULD BE GOOD TO HAVE ONE OF THESE VISUALISATIONS
+
+```
+#KMeans clustering
+```{r}
+#kmeans clustering
+#kmeans - run with nstart=100 and k=2,3,5 to compare results with hclust
+kfit <- kmeans(hcluster.distance, centers=3, nstart=200)
+#plot - need library cluster
+clusplot(as.matrix(hcluster.distance), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+#print contents of kfit
+print(kfit)
+#print cluster sizes
+kfit$size
+#print clusters (members)
+kfit$cluster
+#write clusters to csv file
+write.csv(kfit$cluster,file="../clean_data/KMClustGroups2.csv")
+#sum of squared distance between cluster centers 
+kfit$betweenss
+#sum of squared distance within a cluster (this are the quantities that the algorithm
+#attempts to minimise)
+kfit$withinss
+
+#kmeans - how to determine optimal number of clusters?
+
+#One approach: look for "elbow" in plot of summed intra-cluster distances (withinss) as fn of k
+
+wss <- 2:(length(clean.docs)-1)
+
+for (i in 2:(length(clean.docs)-1)) {
+  wss[i] <- sum(kmeans(hcluster.distance,centers=i,nstart=25)$withinss)
+}
+
+plot(2:(length(clean.docs)-1), wss[2:(length(clean.docs)-1)], type="b", xlab="Number of Clusters", ylab="Within groups sum of squares") 
+```
+
+##Igraph
+```{r}
+library(igraph)
+m<-as.matrix(dtm)
+
+#Map filenames to matrix row numbers
+#these numbers will be used to reference files in the network graph
+filekey <- cbind(1:length(docs),rownames(m))
+write.csv(filekey,"filekey.csv",row.names = FALSE)
+#have a look at file
+rownames(m) <- 1:length(docs)
+#compute cosine similarity between document vectors
+#converting to distance matrix sets diagonal elements to 0
+cosineSim <- function(x){
+  as.dist(x%*%t(x)/(sqrt(rowSums(x^2) %*% t(rowSums(x^2)))))
+}
+cs <- cosineSim(m)
+
+#adjacency matrix: set entries below a certain threshold to 0.
+#We choose half the magnitude of the largest element of the matrix
+#as the cutoff. This is an arbitrary choice
+cs[cs < max(cs)/2] <- 0
+cs <- round(cs,3)
+#write to disk
+write.csv(as.matrix(cs),file="../clean_data/AdjacencyMatrix.csv")
+#open it and have a look
+```
+#build that igraph
+I need to understand how this works better - I can't seem to find the original COmmunity Graph I built??? http://rpubs.com/LexyBrooks/432095
+```{r, fig.width=10, fig.height=12}
+# build a graph from the above matrix
+#mode is undirected because similarity is a bidirectional relationship
+igraph <- graph.adjacency(as.matrix(cs), weighted=T, mode = "undirected")
+#Plot a Graph
+# set seed to make the layout reproducible
+set.seed(42)
+#one of many possible layouts, see igraph docs
+layout1 <- layout.fruchterman.reingold(igraph)
+#basic plot with no weighting - fruchtermann reingold weighting
+plot(igraph, layout=layout1)
+#another layout
+plot(igraph, layout=layout.kamada.kawai)
+# 19,20,21,22 all related
+#24,23,18,27,31,34,24 all sit out on their own
+#33 and 26 relate back to 25, which relates back to 9 and 29
+#36 and 37 relate back to 41, which has other relations
+```
+#fast.greedy 
+```{r, fig.width=10, fig.height=12}
+#Community detection - Fast/Greedy
+comm_fg <- fastgreedy.community(igraph)
+comm_fg$membership
+V(igraph)$color <- comm_fg$membership
+plot(igraph, layout=layout.kamada.kawai)
+community_mapping <- cbind(as.data.frame(filekey, row.names = F),comm_fg$membership)
+community_mapping
+#24, 18 and 31 are their own community
+#34 is similar to 38 and the other greens
+```
+#Louvain
+Community Map - shows the significance of the three thematic areas I've chosen to look at (data science/R, project/risk management, monte carlo)
+```{r, fig.width=10, fig.height=12}
+#Community detection - Louvain
+comm_lv <- cluster_louvain(igraph)
+comm_lv$membership
+V(igraph)$color <- comm_lv$membership
+plot(igraph, layout=layout.kamada.kawai)
+community_mapping <- cbind(community_mapping,comm_lv$membership)
+community_mapping
+#it sees the previous yellow as the same as the orange, but sees 34 as relating to 14, 17 etc
+#slightly different communities
+```
+#another way with Network Graphs
+```{r, fig.width=10, fig.height=12}
+#lets weight the nodes and edges
+#set label (not really necessary)
+#V=vertex, E=edge
+V(igraph)$label <- V(igraph)$name
+#Vertex size proportional to number of connections
+V(igraph)$size <- degree(igraph)*.6
+#Vertex label size proportional to number of connections
+V(igraph)$label.cex <-  degree(igraph) / max(degree(igraph))+ .8
+#label colour default black
+V(igraph)$label.color <- "black"
+#Vertex color organe
+V(igraph)$color <- "orange"
+#edge color grey
+E(igraph)$color <- "grey"
+#edge width proportional to similarity (weight)
+E(igraph)$width <- E(igraph)$weight*7
+# plot the graph in layout1 (fruchtermann reingold)
+plot(igraph, layout=layout1)
+#output is quite ugly. Explore igraph to see how you
+#can fix it
+#9 is important, so is 6 and 7
+```
+```{r, fig.width=10, fig.height=12}
+#lets weight the nodes and edges
+#set label (not really necessary)
+#V=vertex, E=edge
+V(igraph)$label <- V(igraph)$name
+#Vertex size proportional to number of connections
+V(igraph)$size <- degree(igraph)*.6
+#Vertex label size proportional to number of connections
+V(igraph)$label.cex <-  degree(igraph) / max(degree(igraph))+ .6
+#label colour default black
+V(igraph)$label.color <- "black"
+#Vertex color organe
+V(igraph)$color <- "orange"
+#edge color grey
+E(igraph)$color <- "grey"
+#edge width proportional to similarity (weight)
+E(igraph)$width <- E(igraph)$weight*5
+# plot the graph in layout1 (fruchtermann reingold)
+plot(igraph, layout=layout.auto)
+#output is quite ugly. Explore igraph to see how you
+#can fix it
+plot(igraph, layout=layout1)
+```
+#LSA
+Also called latent semantic analysis (LSA), uncovers the underlying latent semantic structure in the usage of words in a body of text and how it can be used to extract the meaning of the text in response to user queries, commonly referred to as concept searches
+```{r}
+library(lsa)
+#Create term-document matrix (lsa expects a TDM rather than a DTM)
+tdm <- TermDocumentMatrix(clean.docs)
+#summary
+tdm
+#inspect segment of document term matrix
+inspect(tdm[1000:1006,1:10])
+
+#what kind of object is the tdm?
+class(tdm)
+#note: a simple triplet matrix (STM) is an efficient format to store
+#sparse matrices
+#need to convert STM to regular matrix
+#convert to regular matrix
+tdm.matrix <- as.matrix(tdm)
+#check class
+class(tdm.matrix)
+dim(tdm.matrix)
+```
+
+```{r}
+#weight terms and docs
+
+#Note: We weight the TDM before calculating the latent semantic space.
+#This is to better reflect the relative importance of each term/doc 
+#in relation to the entire corpus (much like tf-idf weighting).  
+#It is convenient to express the transformation as a product of 
+#two numbers - local and global weight functions, like so:
+#a (i,j) = L(i,j)*G(i).
+#The local weight function L(i,j) presents the weight of term i 
+#in document j. The global weight function G(i) is used to express 
+#the weight of the term iacross the entire document set. 
+
+#We'll use the equivalent of tf-idf (local weight - tf, global -idf)
+#check out other weighting schemes in the documentation (link above)
+tdm.matrix.lsa <- lw_tf(tdm.matrix) * gw_idf(tdm.matrix)
+dim(tdm.matrix.lsa)
+
+```
+```{r}
+#compute the Latent semantic space
+lsaSpace <- lsa(tdm.matrix.lsa, dimcalc_share()) # create LSA space
+#examine output
+names(lsaSpace)
+```
+```{r}
+#Original Matrix is decomposed as: 
+#tk(nterms,lsadim).Sk(lsadim).dk*(lsadim,ndocs)
+#where 
+#nterms=number of terms in TDM
+#ndocs=number of docs in TDM
+#lsadim=dimensionality of Latent Semantic Space (length of Sk)
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["social",1:10]
+#compare to Term-frequency space
+tdm.matrix.lsa["social",1:10]
+#try other words
+#What does this tell you about the term vectors in the two spaces - I have no idea - maybe need to do more reading!?
+
+```
+##Text2Vec does topic modelling but I can't seem to make it work at all. Can also do topic modelling with UDpipe.
+We might need to do this if I really want to prove those three key themese discussed above.
+```{r}
+library(text2vec)
+corpus_file = "../raw_data/doc_corpus"
+text2vec <- readLines(corpus_file, n = 1, warn = FALSE)
+```
+```{r}
+# Create iterator over tokens
+#tokens <- space_tokenizer(tdm)
+# Create vocabulary. Terms will be unigrams (simple words).
+#it = itoken(tokens, progressbar = FALSE)
+#vocab <- create_vocabulary(it)
+
+# Take words which appear 5 or more times
+#vocab <- prune_vocabulary(vocab, term_count_min = 5L)
+
+# Use our filtered vocabulary
+#vectorizer <- vocab_vectorizer(vocab)
+# Create Term Co-occurence matrix, use window of 5 for context words
+#text2vec_tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
+#Now there is a TCM matrix, it can be factorized using the GloVe algorithm
+# Can modify the number of threads used in parallel - default is all available
+#RcppParallel::setThreadOptions(numThreads = 8)
+
+# Train the GloVe model _ THIS IS WHERE IT ALWAYS BREAKS
+#glove = GlobalVectors$new(word_vectors_size = 30, 
+                          #vocabulary = vocab, x_max = 10, learning_rate = 0.001, shuffle = FALSE)
+#word_vectors_main = glove$fit_transform(text2vec_tcm, n_iter = 30, convergence_tol = 0.01)
+
+#dim(word_vectors_main) #CAN'T SEEM TO ACTUALLY CREATE A VECTOR
+#This keeps giving errors - let's abandon text2vec an try topicmodels package instead
+```
+
+
+##UDpipe topic modelling
+```{r}
+ library(udpipe)
+data(clean.docs)
+```

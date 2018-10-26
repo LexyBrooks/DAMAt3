@@ -139,8 +139,9 @@ ord <- order(freq,decreasing=TRUE)
 freq[head(ord)]
 #write to disk and inspect file
 write.csv(file="../clean_data/freq.csv",freq[ord])
-
+#interesting themes from this - algorithm, approach, cluster, author, article, knowledge, method, model, function, interest, manage, organise, project, risk, technique, term, understand, word and work - the word "post" can mean letters but also posting on a blog or watching your post. 
 ```
+
 
 ## Including Plots
 
@@ -162,7 +163,15 @@ findAssocs(dtm,"discuss",0.75)
 findAssocs(dtm,"model",0.75)
 findAssocs(dtm,"risk",0.7)
 findAssocs(dtm,"question",0.7)
-findAssocs(dtm,"document",0.9)
+findAssocs(dtm,"document",0.8)
+findAssocs(dtm,"post",0.8)
+findAssocs(dtm,"technique",0.8)
+findAssocs(dtm,"method",0.8)
+findAssocs(dtm,"problem",0.8)
+findAssocs(dtm,"time",0.8)
+findAssocs(dtm,"data",0.8)
+findAssocs(dtm,"manag",0.8)
+findAssocs(dtm,"ill",0.8)
 ```
 
 
@@ -525,3 +534,4 @@ tdm.matrix.lsa["social",1:10]
 #What does this tell you about the term vectors in the two spaces?
 
 ```
+ 
