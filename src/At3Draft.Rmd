@@ -16,7 +16,13 @@ library(dplyr)      #manipulate dataframes
 library(knitr)       # used to make kable tables
 library(magrittr)
 library(ggthemes)    #to make plots look more interesting
-library(udpipe)
+library(topicmodels)
+library(tidytext)
+library(tidyr)
+library(kableExtra)
+library(igraph)
+library(ggraph)
+library(widyr)
 ```
 
 ##Hey boss, here's how I started to take a look at those 41 different documents
@@ -62,7 +68,9 @@ clean_docs <- function(docs) {
                    "howev",
                    "say",
                    "one",
-                   "use")
+                   "use",
+                   "tm_map",
+                   "t_")
   
   #Remove the custom stopwords
   output = tm_map(output, removeWords, myStopwords)
@@ -99,6 +107,23 @@ document_info <- function(documents, clean.documents) {
     }
   }
   
+  return(document.summary)
+}
+```
+
+```{r}
+
+document_table <- function(documents) {
+  for (i in 1:length(documents)) {
+    document.meta = documents[[i]]$meta
+    document.content = documents[[i]]$content
+    if (i == 1) {
+      document.summary = data.frame(id = document.meta$id, text = document.content)
+    } else {
+      document.temp = data.frame(id = document.meta$id, text = document.content)
+      document.summary = rbind(document.summary, document.temp)
+    }
+  }
   return(document.summary)
 }
 ```
@@ -150,10 +175,6 @@ ord
 #inspect most frequently occurring terms
 freq[head(ord)]
 #write to disk and inspect file ##ANT THIS CSV IS ACTUALLY EMPTY?
-write.csv(file="../clean_data/freq.csv",freq[ord])
-View('freq.csv')
-# get the top 10 words by frequency of appeearance
-freq <- words_frequency[head(ord, 10)] 
 ```
 
 
@@ -203,14 +224,25 @@ findAssocs(dtm,"risk",0.5)
 findAssocs(dtm,"document",0.8)
 ```
 ```{r}
-findAssocs(dtm,"method",0.8) #reveals data science themes
-findAssocs(dtm,"time",0.8) #reveals an important component of risk and project management
+findAssocs(dtm,"method",0.6)%>%
+   kable()  
+#reveals academic terms
+```
+```{r}
+findAssocs(dtm,"time",0.8)%>%
+   kable()  %>%
+   kable_styling(bootstrap_options = "striped", full_width = F, font_size = 18) 
+```
+
+```{r}
+#reveals an important component of risk and project management
 findAssocs(dtm,"data",0.8)
 findAssocs(dtm,"manag",0.8)
 ```
 ```{r, fig.width=10, fig.height=12}
-findAssocs(dtm,"eleph", 0.08)
-#wordcloud
+findAssocs(dtm,"eleph", 0.8) %>%
+   kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font_size = 18) 
 ```
 
 
@@ -224,8 +256,8 @@ ggplot(subset(wf, occurrences>100), aes(term, occurrences)) + geom_bar(stat="ide
 # Project is a word likely to co-occur with both management and other words like work or problem or example
 
 ```{r}
-#order the plot by frequency
-ggplot(subset(wf, occurrences>100), aes(reorder(term,occurrences), occurrences)) + geom_bar(stat="identity", fill = 'lightblue', color='black') + theme(axis.text.x=element_text(angle=45, hjust=1)) + labs(title = "Most frequently occuring terms in order of volume in 41 documents",
+#order and condense the frequency words
+ggplot(subset(wf, occurrences>200), aes(reorder(term,occurrences), occurrences)) + geom_bar(stat="identity", fill = 'lightblue', color='black') + theme(axis.text.x=element_text(angle=45, hjust=1, size=14, face="bold")) + labs(title = "Most frequently occuring terms in order of volume in 41 documents",
              x = "Words", y = "occurences")
 ```
  
@@ -243,17 +275,19 @@ wordcloud(names(freq),freq,max.words=75,colors=brewer.pal(6,"Dark2"))
 
 ```
 #Make ngrams when you want to explore what's in a particular document
-```{r}
-#to see what ngrams does, try running ngrams(words(docs[[1]]$content),2), which
-ngrams(words(docs[[1]]$content),2) 
-    ```
-
+```{r, fig.width=20, fig.height=5}
+#to see what ngrams does 
+ngrams(words(docs[[1]]$content),2) %>%
+  kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font = 18) 
+```
+ 
 
 #Making bigrams of words in the corpus
 
 ```{r}
 
-#returns bigrams for the first document in the corpus
+#returns bigrams for the first document in the corpus? OR IS THIS ALL THE DOCUMENTS/HOW CAN I TELL IN THE CODE? IF I CAN DO INDIVIDUAL DOCS, THAT COULD BE INTERESTING
 BigramTokenizer <-  function(x) unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
 #create DTM
 dtmbi <- DocumentTermMatrix(clean.docs, control = list(tokenize = BigramTokenizer))
@@ -261,17 +295,113 @@ freqbi <- colSums(as.matrix(dtmbi))
 #length should be total number of terms - seem to be 34967 bigrams
 length(freqbi)
 #create sort order (asc)
-ordbi <- order(freqbi,decreasing=TRUE) %>% 
-  kable()
+ordbi <- order(freqbi,decreasing=TRUE) 
 #inspect most frequently occurring terms
-freqbi[head(ordbi)]
-#ANT QUESTION - CAN I PLOT THIS?
+freqbi[head(ordbi)] %>%
+  kable()
+#ANT QUESTION - CAN I PLOT THIS OR MAKE A TABLE LIKE I DID ABOVE?
 
+```
+
+
+```{r}
+
+document.text <- document_table(docs)
+document.text
+```
+
+```{r}
+
+#trying with tidytext
+corpus_bigrams <- document.text %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+corpus_bigrams
+```
+```{r}
+#counting bigrams
+corpus_bigrams %>%
+  count(bigram, sort = TRUE)
+bigrams_separated <- corpus_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>%
+  count(word1, word2, sort = TRUE)
+
+bigram_counts
+```
+```{r}
+#looking at risk and management and project management bigrams
+bigrams_filtered %>%
+  filter(word2 == "risk") %>%
+  count(id, word1, sort = TRUE)
+```
+```{r}
+bigram_graph <- bigram_counts %>%
+  filter(n > 20) %>%
+  graph_from_data_frame()
+
+bigram_graph
+
+```
+```{r}
+set.seed(42)
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+```{r, fig.width=12}
+#improving the visual
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void() + labs(title = "Most frequently occuring bigrams")
 ```
 
 
 ##TF-IDF
 TF is the term frequency, or how frequently a word occurs in a document. IDF is inverse document frequency, which decreases the weight for commonly used words and increases the weight for words that are not used very much in a collection of documents. 
+```{r}
+#tidytext approach first - which documents does management appear in? Only 25 of the 41 docs
+bigrams_filtered %>%
+  filter(word1 == "management") %>%
+  count(id, word1, sort = TRUE)%>%
+  kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font = 18) 
+```
+
+ 
+```{r}
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+bigrams_united %>%
+  filter(bigram =="project management") %>%
+  kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font = 18) 
+```
+```{r}
+bigrams_united %>%
+  filter(bigram =="risk management") %>%
+  kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font = 18) 
+```
+```{r}
+bigrams_united %>%
+  filter(bigram =="monte carlo") %>%
+  kable()  %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, font = 18) 
+```
+
 
 ```{r}
 dtm_tfidf <- DocumentTermMatrix(clean.docs, control = list(weighting = weightTfIdf))
@@ -279,12 +409,9 @@ dtm_tfidf <- DocumentTermMatrix(clean.docs, control = list(weighting = weightTfI
 #document are normalised by the number of terms in the document)
 #summary
 dtm_tfidf
-```
-#TF IDF has less terms now
 
-```{r}
 #inspect segment of document term matrix
-inspect(dtm_tfidf[20:30,2000:2006])
+inspect(dtm_tfidf[01:10,2000:2006])
 
 ```
 
@@ -303,69 +430,49 @@ write.csv(file="../clean_data/wt_tot_tfidf.csv",wt_tot_tfidf[ord_tfidf])
 ```
 ```{r}
 #inspect least weighted terms - wickham, wordcloudnames and what looks like a jumble of r code snippets. youtube, zip
-wt_tot_tfidf[tail(ord_tfidf)]
-#ANT QUESTION _ CAN I PLOT THIS?
-wt_tot_tfidf[head(ord_tfidf)]
-#is simul about monte carlo? I should probably also explore the elephant, which is a metaphor in a couple of documents - could maybe fictionalise this because there is a publisher prize for the best use of elephant similes and metaphors in academic writing???
-
-```
-##I want to do a graph like this of the top terms in all 41 docs https://rpubs.com/tsholliger/301914
-(Scroll down halfway to see highest tf-idf words in Philosophers Stone by Chapter)
-```{r}
-#Convert dtm into a Dataframe
-library(tidytext)
-# THIS IS THE COPY AND PASTED CODE JUST FOR YOUR REFERENCE - NOTE THE TIDY FUNCTION IS NOW DEPRECATED take the product of tf and idf and create new column labeled "tf_idf". Graph it. 
-#bind_tf_idf(dtm_tfidf, term_col = term, document_col = document, n_col = count) %>% 
-  #arrange(desc(dtm_tfidf)) %>%
-  #mutate(word = factor(term, levels = rev(unique(term))),
-               #chapter = factor(document, levels = 1:17)) %>%  
-  #group_by(document) %>% 
-  #top_n(6, wt = tf_idf) %>% 
-  #ungroup() %>% 
-  #ggplot(aes(word, tf_idf, fill = document)) +
-        #geom_bar(stat = "identity", alpha = .8, show.legend = FALSE) +
-        #labs(title = "Highest tf-idf words in Philosopher's Stone by Chapter",
-            # x = "Words", y = "tf-idf") +
-        #facet_wrap(~chapter, ncol = 2, scales = "free") +
-        #coord_flip()
-
+wt_tot_tfidf[tail(ord_tfidf)] %>%
+  kable()
 ```
 
-```{r, fig.width=10, fig.height=12}
-#try a word cloud of tfidf
-#setting the same seed each time ensures consistent look across clouds
-set.seed(42)
-#limit words by specifying min total wt
-wordcloud(names(wt_tot_tfidf),wt_tot_tfidf, max.words=50)
-#...add color
-wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,max.words=150,colors=brewer.pal(6,"Dark2"))
-#play with different values of max.words
-#try specifying min.freq instead of max.words
-wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,min.freq=200,colors=brewer.pal(6,"Dark2"))
-```
 ```{r}
 #correlations - compare to dtm generated by  tf and tf/truncated weighting "project" at correlation level of 0.6
-findAssocs(dtm_tfidf,"risk",0.5)
-findAssocs(dtm_tfidf,"distribution",0.8)
-findAssocs(dtm_tfidf,"elephant",0.4)
+findAssocs(dtm_tfidf,"risk",0.5) %>%
+  kable()
+```
+
+
+```{r}
+findAssocs(dtm_tfidf,"eleph",0.6)
+#HOW CAN I MAKE A WORD CLOUD OF THIS PARTICULAR ONE
+```
+```{r}
 findAssocs(dtm_tfidf,"monte carlo",0.8)
-findAssocs(dtm_tfidf,"eleph",0.5)
+```
+```{r}
 findAssocs(dtm_tfidf,"wickham",0.8)
-findAssocs(dtm_tfidf,"hubbard",0.8)
-findAssocs(dtm_tfidf,"scapegoat",0.8)
-findAssocs(dtm_tfidf,"risk",0.8)
+```
+```{r}
+findAssocs(dtm_tfidf,"risk",0.4)
+```
+
+```{r}
 findAssocs(dtm_tfidf,"post",0.5)
+```
+
+```{r}
 findAssocs(dtm_tfidf,"project",0.5)
 findAssocs(dtm_tfidf,"manag",0.5)
 ```
+
 ```{r, fig.width=10, fig.height=12}
 #histogram
 wf=data.frame(term=names(wt_tot_tfidf),weights=wt_tot_tfidf)
 #library(ggplot2)
-ggplot(subset(wf, wt_tot_tfidf>.1), aes(reorder(term,weights), weights)) + geom_bar(stat="identity") + theme(axis.text.x=element_text(angle=45, hjust=1)) + labs(title = "Tf-idf terms in all docs", x = "Words", y = "tf-idf weights") 
+ggplot(subset(wf, wt_tot_tfidf>.1), aes(reorder(term,weights), weights)) + geom_bar(stat="identity", fill = 'lightblue', color='black') + theme(axis.text.x=element_text(angle=45, hjust=1, size=14, face="bold")) + labs(title = "Tf-idf terms in all docs", x = "Words", y = "tf-idf weights") 
+
 ```
-#WOrdcloud of TF-IDF - to see weighted words
-```{r, fig.width=10, fig.height=12}
+#Wordcloud of TF-IDF - to see weighted words
+```{r, fig.width=15, fig.height=12}
 #wordcloud
 #setting the same seed each time ensures consistent look across clouds
 set.seed(42)
@@ -376,6 +483,8 @@ wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,max.words=100,colors=brewer.pal(6,"Da
 #play with different values of max.words
 #try specifying min.freq instead of max.words
 wordcloud(names(wt_tot_tfidf),wt_tot_tfidf,min.freq=50,colors=brewer.pal(6,"Dark2"))
+
+
 
 ```
 ##Cluster analysis
@@ -438,7 +547,7 @@ write.csv(cosine.hclusters, "../clean_data/hclusters_cosine.csv")
 
 ```
 #KMeans clustering
-```{r}
+```{r, fig.width=15, fig.height=15}
 #kmeans clustering
 #kmeans - run with nstart=100 and k=2,3,5 to compare results with hclust
 kfit <- kmeans(hcluster.distance, centers=3, nstart=200)
@@ -497,6 +606,7 @@ cs <- round(cs,3)
 #write to disk
 write.csv(as.matrix(cs),file="../clean_data/AdjacencyMatrix.csv")
 #open it and have a look
+cosineSim
 ```
 #build that igraph
 I need to understand how this works better - I can't seem to find the original COmmunity Graph I built??? http://rpubs.com/LexyBrooks/432095
@@ -595,19 +705,19 @@ Also called latent semantic analysis (LSA), uncovers the underlying latent seman
 ```{r}
 library(lsa)
 #Create term-document matrix (lsa expects a TDM rather than a DTM)
-tdm <- TermDocumentMatrix(clean.docs)
+tdm2 <- TermDocumentMatrix(clean.docs)
 #summary
-tdm
+tdm2
 #inspect segment of document term matrix
-inspect(tdm[1000:1006,1:10])
+inspect(tdm2[1000:1006,1:10])
 
 #what kind of object is the tdm?
-class(tdm)
+class(tdm2)
 #note: a simple triplet matrix (STM) is an efficient format to store
 #sparse matrices
 #need to convert STM to regular matrix
 #convert to regular matrix
-tdm.matrix <- as.matrix(tdm)
+tdm.matrix <- as.matrix(tdm2)
 #check class
 class(tdm.matrix)
 dim(tdm.matrix)
@@ -632,6 +742,14 @@ tdm.matrix.lsa <- lw_tf(tdm.matrix) * gw_idf(tdm.matrix)
 dim(tdm.matrix.lsa)
 
 ```
+##LDA
+In natural language processing, latent Dirichlet allocation (LDA) is a generative statistical model that allows sets of observations to be explained by unobserved groups that explain why some parts of the data are similar.
+
+Every document is a mixture of topics. We imagine that each document may contain words from several topics in particular proportions. For example, in a two-topic model we could say “Document 1 is 90% topic A and 10% topic B, while Document 2 is 30% topic A and 70% topic B.”
+Every topic is a mixture of words. For example, we could imagine a two-topic model of American news, with one topic for “politics” and one for “entertainment.” The most common words in the politics topic might be “President”, “Congress”, and “government”, while the entertainment topic may be made up of words such as “movies”, “television”, and “actor”. Importantly, words can be shared between topics; a word like “budget” might appear in both equally.
+LDA is a mathematical method for estimating both of these at the same time: finding the mixture of words that is associated with each topic, while also determining the mixture of topics that describes each document. There are a number of existing implementations of this algorithm, and we’ll explore one of them in depth.
+
+
 ```{r}
 #compute the Latent semantic space
 lsaSpace <- lsa(tdm.matrix.lsa, dimcalc_share()) # create LSA space
@@ -648,50 +766,53 @@ names(lsaSpace)
 LSAMat <- as.textmatrix(lsaSpace)
 #1)
 #Examine a term in LS space
-LSAMat["social",1:10]
+LSAMat["risk",1:41]
 #compare to Term-frequency space
-tdm.matrix.lsa["social",1:10]
-#try other words
-#What does this tell you about the term vectors in the two spaces - I have no idea - maybe need to do more reading!?
+tdm.matrix.lsa["project",1:41]
+#plot risk frequency
 
-```
-##Text2Vec does topic modelling but I can't seem to make it work at all. Can also do topic modelling with UDpipe.
-We might need to do this if I really want to prove those three key themese discussed above.
-```{r}
-library(text2vec)
-corpus_file = "../raw_data/doc_corpus"
-text2vec <- readLines(corpus_file, n = 1, warn = FALSE)
 ```
 ```{r}
-# Create iterator over tokens
-#tokens <- space_tokenizer(tdm)
-# Create vocabulary. Terms will be unigrams (simple words).
-#it = itoken(tokens, progressbar = FALSE)
-#vocab <- create_vocabulary(it)
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["eleph",1:41]
+#compare to Term-frequency space
+tdm.matrix.lsa["amok",1:41]
+#plot risk frequency
 
-# Take words which appear 5 or more times
-#vocab <- prune_vocabulary(vocab, term_count_min = 5L)
-
-# Use our filtered vocabulary
-#vectorizer <- vocab_vectorizer(vocab)
-# Create Term Co-occurence matrix, use window of 5 for context words
-#text2vec_tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
-#Now there is a TCM matrix, it can be factorized using the GloVe algorithm
-# Can modify the number of threads used in parallel - default is all available
-#RcppParallel::setThreadOptions(numThreads = 8)
-
-# Train the GloVe model _ THIS IS WHERE IT ALWAYS BREAKS
-#glove = GlobalVectors$new(word_vectors_size = 30, 
-                          #vocabulary = vocab, x_max = 10, learning_rate = 0.001, shuffle = FALSE)
-#word_vectors_main = glove$fit_transform(text2vec_tcm, n_iter = 30, convergence_tol = 0.01)
-
-#dim(word_vectors_main) #CAN'T SEEM TO ACTUALLY CREATE A VECTOR
-#This keeps giving errors - let's abandon text2vec an try topicmodels package instead
 ```
 
-
-##UDpipe topic modelling
 ```{r}
- library(udpipe)
-data(clean.docs)
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["model",1:41]
+#compare to Term-frequency space
+tdm.matrix.lsa["carlo",1:41]
+#plot risk frequency
 ```
+
+```{r}
+ #create a two topic model
+ # set a seed so that the output of the model is predictable
+data_lda <- LDA(tdm2, k = 2, control = list(seed = 1234))
+data_lda
+```
+```{r}
+#Besides estimating each topic as a mixture of words, LDA also models each document as a mixture of topics. We can examine the per-document-per-topic probabilities, called  
+lda_topics <-tidy(tdm2, matrix = "beta")
+lda_topics
+#BETA NOT SHOWING UP? WHY NOT - reference is here https://www.tidytextmining.com/topicmodeling.html
+```
+```{r}
+#order to get the top terms
+termlda <- "term"
+documentlda <- "document"
+lda_top_terms <- lda_topics %>%
+  group_by(termlda) %>%
+  top_n(100, beta) %>%
+  ungroup() %>%
+  arrange(termlda, -beta)
+```
+
