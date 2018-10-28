@@ -1,0 +1,390 @@
+---
+title: "AT3_consolidated"
+author: "Alex Brooks"
+date: "27/10/2018"
+output: html_document
+---
+
+##My goal is to find out what's in these 41 different text documents
+```{r setup, include=FALSE}
+library(tm) 
+library(lsa)
+library(SnowballC)
+library(ggplot2)
+library(wordcloud)
+library(cluster)
+library(dplyr)      #manipulate dataframes
+library(knitr)       # used to make kable tables
+library(magrittr)
+library(ggthemes)    #to make plots look more interesting
+library(topicmodels)
+library(tidytext)
+library(tidyr)
+library(kableExtra)
+library(igraph)
+library(ggraph)
+library(widyr)
+```
+
+Looking at docs corpus and analysing themes means loading the docs and cleaning them to turn them into the correct format for analysis.
+
+```{r}
+#Load the corpus
+docs <- VCorpus(DirSource("../raw_data/doc_corpus"))
+
+num.docs <- length(docs)
+
+```
+
+#Write a standard function to clean the documents
+```{r}
+
+clean_docs <- function(docs) {
+  
+  output = docs
+  
+  #Remove punctuation - replace punctuation marks with " "
+  output = tm_map(output, removePunctuation)
+  
+  #Transform to lower case
+  output = tm_map(output,content_transformer(tolower))
+  
+  #Strip digits
+  output = tm_map(output, removeNumbers)
+  
+  #Remove stopwords from standard stopword list 
+  output = tm_map(output, removeWords, stopwords("english"))
+  
+  #Create a custom set of stopwords that weren't removed by the standard stopwords list
+  myStopwords <- c("can",
+                   "also",
+                   "get",
+                   "see",
+                   "may",
+                   "much",
+                   "now",
+                   "said",
+                   "will",
+                   "way",
+                   "well",
+                   "howev",
+                   "say",
+                   "one",
+                   "use",
+                   "tm_map",
+                   "t_")
+  
+  #Remove the custom stopwords
+  output = tm_map(output, removeWords, myStopwords)
+  
+  #Strip whitespace (cosmetic?)
+  output = tm_map(output, stripWhitespace)
+  
+  return(output)
+  
+}
+```
+
+#A bit of basic analysis of documents with this function
+```{r}
+
+document_info <- function(documents, clean.documents) {
+  
+  num.documents = length(clean.documents)
+  
+  for(i in 1:num.documents) {
+    document.meta = clean.documents[[i]]$meta
+    document.content = clean.documents[[i]]$content
+    raw.document.content = documents[[i]]$content
+    
+    if (i == 1) {
+      document.summary = data.frame(id = document.meta$id,
+                                    language = document.meta$language,
+                                    datetimestamp = document.meta$datetimestamp,
+                                    raw.characters = nchar(raw.document.content),
+                                    clean.characters = nchar(document.content))
+    } else {
+      document.temp = data.frame(id = document.meta$id,
+                                 language = document.meta$language,
+                                 datetimestamp = document.meta$datetimestamp,
+                                 raw.characters = nchar(raw.document.content),
+                                 clean.characters = nchar(document.content))
+      
+      document.summary = rbind(document.summary, document.temp)
+    }
+  }
+  
+  return(document.summary)
+}
+```
+
+#A function to put document text into a table if needed
+```{r}
+
+document_table <- function(documents) {
+  for (i in 1:length(documents)) {
+    document.meta = documents[[i]]$meta
+    document.content = documents[[i]]$content
+    
+    if (i == 1) {
+      document.summary = data.frame(id = document.meta$id,
+                                    text = document.content)
+    } else {
+      document.temp = data.frame(id = document.meta$id,
+                                 text = document.content)
+      
+      document.summary = rbind(document.summary, document.temp)
+    }
+  }
+  
+  return(document.summary)
+}
+```
+
+##Clean the documents and create a variable with stems of the cleaned corpus
+```{r}
+
+clean.docs <- clean_docs(docs)
+
+stem.clean.docs <- tm_map(clean.docs,stemDocument)
+
+```
+
+```{r}
+#running the function on raw docs and clean docs
+doc.info <- document_info(docs, clean.docs)
+
+#View the raw character length of each document
+ggplot(doc.info, aes(reorder(id,raw.characters), raw.characters)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+##Create a document term matrix and a term document matrix
+
+```{r}
+#Create document-term matrix
+doc.term.matrix <- DocumentTermMatrix(stem.clean.docs)
+term.doc.matrix <- TermDocumentMatrix(stem.clean.docs)
+
+```
+
+
+```{r}
+#Get the list of terms ordered by use of that term within the docs
+doc.terms <- as.matrix(doc.term.matrix)
+doc.term.freq <- colSums(doc.terms)
+
+```
+
+```{r}
+#create a data frame with terms and their frequency
+df.term.freq <- as.data.frame(doc.term.freq)
+#convert ronames (terms) to a column of the data frame
+df.term.freq$terms <- rownames(df.term.freq)
+#change the column name of frequency
+colnames(df.term.freq)[names(df.term.freq) == "doc.term.freq"] <- "freq"
+#remove rownames
+rownames(df.term.freq) <- NULL
+#order by frequenecy
+df.term.freq <- df.term.freq[order(df.term.freq$freq, decreasing=TRUE),]
+```
+
+```{r}
+#View terms with a frequency greater than 100
+ggplot(subset(df.term.freq, freq>100), aes(reorder(terms,freq), freq)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+#Let's make a word cloud of the top 50 terms by frequency
+set.seed(42)
+wordcloud(df.term.freq$terms,df.term.freq$freq,max.words=50,colors=brewer.pal(6,"Dark2"))
+```
+
+#Making bigrams of words in the corpus
+
+```{r}
+bigram.tokenizer <-  function(x) {
+    unlist(
+        lapply(
+            ngrams(words(x), 2),
+            paste,
+            collapse = " "),
+        use.names = FALSE)
+}
+
+bigram.doc.term.matrix <- DocumentTermMatrix(stem.clean.docs, control = list(tokenize = bigram.tokenizer))
+bigram.doc.term.freq <- colSums(as.matrix(bigram.doc.term.matrix))
+
+#create a data frame with terms and their frequency
+df.bi.freq <- as.data.frame(bigram.doc.term.freq)
+#convert rownames (terms) to a column of the data frame
+df.bi.freq$terms <- rownames(df.bi.freq)
+#change the column name of frequency
+colnames(df.bi.freq)[names(df.bi.freq) == "bigram.doc.term.freq"] <- "freq"
+#remove rownames
+rownames(df.bi.freq) <- NULL
+#order by frequenecy
+df.bi.freq <- df.bi.freq[order(df.bi.freq$freq, decreasing=TRUE),]
+```
+
+```{r}
+trigram.tokenizer <-  function(x) {
+    unlist(
+        lapply(
+            ngrams(words(x), 3),
+            paste,
+            collapse = " "),
+        use.names = FALSE)
+}
+
+trigram.doc.term.matrix <- DocumentTermMatrix(stem.clean.docs, control = list(tokenize = trigram.tokenizer))
+trigram.doc.term.freq <- colSums(as.matrix(trigram.doc.term.matrix))
+
+#create a data frame with terms and their frequency
+df.tri.freq <- as.data.frame(trigram.doc.term.freq)
+#convert ronames (terms) to a column of the data frame
+df.tri.freq$terms <- rownames(df.tri.freq)
+#change the column name of frequency
+colnames(df.tri.freq)[names(df.tri.freq) == "trigram.doc.term.freq"] <- "freq"
+#remove rownames
+rownames(df.tri.freq) <- NULL
+#order by frequenecy
+df.tri.freq <- df.tri.freq[order(df.tri.freq$freq, decreasing=TRUE),]
+
+```
+
+#Create a data frame of each document name and their corresponding text
+```{r}
+document.text <- document_table(stem.clean.docs)
+```
+
+```{r}
+#trying with tidytext
+corpus_bigrams <- unnest_tokens(document.text, bigram, text, token = "ngrams", n = 2)
+corpus_bigrams
+```
+
+```{r}
+#counting bigrams
+bigrams_separated <- corpus_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>%
+  count(word1, word2, sort = TRUE)
+
+bigram_graph <- bigram_counts %>%
+  filter(n > 20) %>%
+  graph_from_data_frame()
+
+set.seed(42)
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+
+```
+
+
+```{r, fig.width=12}
+#improving the visual
+arrow <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = arrow, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void() + labs(title = "Most frequently occuring bigrams")
+```
+
+```{r}
+#tidytext approach first - which documents does management appear in? Only 25 (? or 34) of the 41 docs
+docs.with.management <- bigrams_separated %>%
+  filter(word1 == "manag") %>%
+  count(id, word1, sort = TRUE)
+
+ggplot(docs.with.management, aes(reorder(id,n), n)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+
+ 
+```{r}
+docs.with.proj.mgmt <- corpus_bigrams %>%
+  filter(bigram =="project manag") %>%
+  count(id, bigram, sort = TRUE)
+
+ggplot(docs.with.proj.mgmt, aes(reorder(id,n), n)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+docs.with.risk.mgmt <- corpus_bigrams %>%
+  filter(bigram =="risk manag") %>%
+  count(id, bigram, sort = TRUE)
+
+ggplot(docs.with.risk.mgmt, aes(reorder(id,n), n)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+docs.with.monte.carlo <- corpus_bigrams %>%
+  filter(bigram =="mont carlo") %>%
+  count(id, bigram, sort = TRUE)
+
+ggplot(docs.with.monte.carlo, aes(reorder(id,n), n)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#Let's look at Term Frequency but using inverse document frequency
+Note that the weighting is normalised by default (that is, the term frequencies in a document are normalised by the number of terms in the document)
+
+```{r}
+idf.doc.term.matrix <- DocumentTermMatrix(stem.clean.docs, control = list(weighting = weightTfIdf))
+```
+
+```{r}
+#Get the list of terms ordered by use of that term within the docs
+idf.doc.terms <- as.matrix(idf.doc.term.matrix)
+idf.doc.term.freq <- colSums(idf.doc.terms)
+
+```
+
+```{r}
+#create a data frame with terms and their frequency
+df.idf.term.freq <- as.data.frame(idf.doc.term.freq)
+#convert ronames (terms) to a column of the data frame
+df.idf.term.freq$terms <- rownames(df.idf.term.freq)
+#change the column name of frequency
+colnames(df.idf.term.freq)[names(df.idf.term.freq) == "idf.doc.term.freq"] <- "freq"
+#remove rownames
+rownames(df.idf.term.freq) <- NULL
+#order by frequenecy
+df.idf.term.freq <- df.idf.term.freq[order(df.idf.term.freq$freq, decreasing=TRUE),]
+
+View(df.idf.term.freq)
+
+```
+
+```{r}
+#View terms with a frequency greater than 0.1
+ggplot(subset(df.idf.term.freq, freq>0.1), aes(reorder(terms,freq), freq)) +
+    geom_bar(stat = "identity", fill='lightblue', color='black') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
