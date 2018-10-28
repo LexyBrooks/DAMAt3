@@ -264,7 +264,6 @@ document.text <- document_table(stem.clean.docs)
 ```{r}
 #trying with tidytext
 corpus_bigrams <- unnest_tokens(document.text, bigram, text, token = "ngrams", n = 2)
-corpus_bigrams
 ```
 
 ```{r}
@@ -387,4 +386,237 @@ View(df.idf.term.freq)
 ggplot(subset(df.idf.term.freq, freq>0.1), aes(reorder(terms,freq), freq)) +
     geom_bar(stat = "identity", fill='lightblue', color='black') +
     theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#wordcloud
+```{r}
+set.seed(42)
+#limit words by specifying min total wt
+wordcloud(df.idf.term.freq$terms,df.idf.term.freq$freq, max.words=50,colors=brewer.pal(6,"Dark2"))
+```
+
+
+#LSA
+Also called latent semantic analysis (LSA), uncovers the underlying latent semantic structure in the usage of words in a body of text and how it can be used to extract the meaning of the text in response to user queries, commonly referred to as concept searches
+
+
+```{r}
+#Use term-document matrix (lsa expects a TDM rather than a DTM) and convert to regular matrix
+lsa.matrix <- as.matrix(term.doc.matrix)
+```
+
+
+###weight terms and docs
+
+Note: We weight the TDM before calculating the latent semantic space. This is to better reflect the relative importance of each term/doc in relation to the entire corpus (much like tf-idf weighting). It is convenient to express the transformation as a product of two numbers - local and global weight functions, like so: a (i,j) = L(i,j)*G(i).
+
+The local weight function L(i,j) presents the weight of term i in document j. The global weight function G(i) is used to express the weight of the term iacross the entire document set. 
+
+We'll use the equivalent of tf-idf (local weight - tf, global -idf).
+
+```{r}
+lsa.weighted.matrix <- lw_tf(lsa.matrix) * gw_idf(lsa.matrix)
+```
+
+
+##LDA
+In natural language processing, latent Dirichlet allocation (LDA) is a generative statistical model that allows sets of observations to be explained by unobserved groups that explain why some parts of the data are similar.
+
+Every document is a mixture of topics. We imagine that each document may contain words from several topics in particular proportions. For example, in a two-topic model we could say “Document 1 is 90% topic A and 10% topic B, while Document 2 is 30% topic A and 70% topic B.”
+Every topic is a mixture of words. For example, we could imagine a two-topic model of American news, with one topic for “politics” and one for “entertainment.” The most common words in the politics topic might be “President”, “Congress”, and “government”, while the entertainment topic may be made up of words such as “movies”, “television”, and “actor”. Importantly, words can be shared between topics; a word like “budget” might appear in both equally.
+LDA is a mathematical method for estimating both of these at the same time: finding the mixture of words that is associated with each topic, while also determining the mixture of topics that describes each document. There are a number of existing implementations of this algorithm, and we’ll explore one of them in depth.
+
+
+```{r}
+#compute the Latent semantic space
+lsaSpace <- lsa(lsa.weighted.matrix, dimcalc_share()) # create LSA space
+#examine output
+names(lsaSpace)
+```
+```{r}
+#Original Matrix is decomposed as: 
+#tk(nterms,lsadim).Sk(lsadim).dk*(lsadim,ndocs)
+#where 
+#nterms=number of terms in TDM
+#ndocs=number of docs in TDM
+#lsadim=dimensionality of Latent Semantic Space (length of Sk)
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["risk",1:41]
+#compare to Term-frequency space
+lsa.weighted.matrix["risk",1:41]
+#plot risk frequency
+
+```
+```{r}
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["eleph",1:41]
+#compare to Term-frequency space
+lsa.weighted.matrix["amok",1:41]
+#plot risk frequency
+
+```
+
+```{r}
+LSAMat <- as.textmatrix(lsaSpace)
+#1)
+#Examine a term in LS space
+LSAMat["model",1:41]
+#compare to Term-frequency space
+lsa.weighted.matrix["carlo",1:41]
+#plot risk frequency
+```
+
+```{r}
+ #create a two topic model
+ # set a seed so that the output of the model is predictable
+data_lda <- LDA(doc.term.matrix, k = 3, control = list(seed = 1234))
+
+```
+
+```{r}
+#Besides estimating each topic as a mixture of words, LDA also models each document as a mixture of topics. We can examine the per-document-per-topic probabilities, called  
+
+lda_topics <-tidy(data_lda, matrix = "beta")
+lda_topics
+#BETA NOT SHOWING UP? WHY NOT - reference is here https://www.tidytextmining.com/topicmodeling.html
+```
+
+
+```{r}
+#order to get the top terms
+lda_top_terms <- lda_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+```
+
+```{r}
+lda_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+```{r, fig.width=10, fig.height=5}
+
+document.text$text <- as.character(document.text$text)
+
+# split into words
+by_chapter_word <- document.text %>%
+  unnest_tokens(word, text)
+
+# find document-word counts
+word_counts <- by_chapter_word %>%
+  anti_join(stop_words) %>%
+  count(id, word, sort = TRUE) %>%
+  ungroup()
+
+#Cast to a document term matrix
+docs.dtm <- word_counts %>%
+  cast_dtm(id, word, n)
+
+#Do LDA
+docs.lda <- LDA(docs.dtm, k = 3, control = list(seed = 1234))
+
+#Get per-topic term probabilities
+docs.topics <- tidy(docs.lda, matrix = "beta")
+
+#Find the top 10 topic terms
+doc.top.terms <- docs.topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+```
+
+```{r}
+#Plot the top 10 terms for each topic
+doc.top.terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+```{r}
+#Examine the per-document-per-topic probabilities
+docs.gamma <- tidy(docs.lda, matrix = "gamma")
+
+#PLot the probabilities
+docs.gamma %>%
+  mutate(document = reorder(document, gamma * topic)) %>%
+  ggplot(aes(factor(topic), gamma)) +
+  geom_boxplot() +
+  facet_wrap(~ document)
+
+```
+
+```{r}
+docs.gamma$gamma.integer <- round(docs.gamma$gamma * 10)
+
+docs.gamma %>%
+  mutate(document = reorder(document, gamma * topic))
+```
+
+```{r}
+
+docs.gamma %>%
+  filter(gamma.integer > 7, topic == 1)
+
+```
+
+```{r}
+docs.gamma %>%
+  filter(gamma.integer > 7, topic == 2)
+```
+
+
+
+```{r}
+docs.gamma %>%
+  filter(gamma.integer > 7, topic == 3)
+```
+
+
+```{r}
+docs.gamma %>%
+  filter((gamma.integer < 7 & topic == 1) & (gamma.integer < 7 & topic == 2) & (gamma.integer < 7 & topic == 3))
+```
+
+```{r}
+  for (i in 1:num.docs) {
+    if (i < 10) {
+      doc.name = paste("Doc0", i, ".txt", sep="")
+    } else {
+      doc.name = paste("Doc", i, ".txt", sep="")
+    }
+    temp.gamma <- docs.gamma %>%
+      filter(document == doc.name)
+    
+      topic1 = temp.gamma$gamma[temp.gamma$topic == 1]
+      topic1.int = temp.gamma$gamma.integer[temp.gamma$topic == 1]
+      topic2 = temp.gamma$gamma[temp.gamma$topic == 2]
+      topic2.int = temp.gamma$gamma.integer[temp.gamma$topic == 2]
+      topic3 = temp.gamma$gamma[temp.gamma$topic == 3]
+      topic3.int = temp.gamma$gamma.integer[temp.gamma$topic == 3]
+      
+      temp = data.frame(document=doc.name, topic1.gamma = topic1, topic2.gamma = topic2, topic3.gamma = topic3, topic1.gamma.int = topic1.int, topic2.gamma.int = topic2.int, topic3.gamma.int = topic3.int)
+      
+      if (i == 1) {
+        new.df = temp
+      } else {
+        new.df = rbind(new.df, temp)
+      }
+  }
+
+new.df %>%
+  filter(topic1.gamma.int <= 7, topic2.gamma.int <= 7, topic3.gamma.int <= 7)
 ```
